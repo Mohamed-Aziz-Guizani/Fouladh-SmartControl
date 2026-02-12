@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import '../models/machine.dart';
 import '../services/machine_service.dart';
 import '../widgets/machine_card.dart';
+import '../utils/dialog_helper.dart'; // Import du helper créé ci-dessus
 
 class DepartmentPage extends StatefulWidget {
-  // Le nom du département est transmis par le constructeur via onGenerateRoute
   final String deptName;
-  
+
   const DepartmentPage({super.key, required this.deptName});
 
   @override
@@ -14,68 +14,139 @@ class DepartmentPage extends StatefulWidget {
 }
 
 class _DepartmentPageState extends State<DepartmentPage> {
-  late List<Machine> machines;
+  // --- DÉPENDANCES ---
+  final MachineService _machineService = MachineService();
+  
+  // --- ÉTAT ---
+  late Future<List<Machine>> _machinesFuture;
 
   @override
   void initState() {
     super.initState();
-    // Chargement des données via le service (Abstraction)
-    machines = MachineService.getMachinesByDept(widget.deptName);
+    _loadData();
   }
 
-  // Méthode pour gérer le changement d'état et la notification
-  void _toggleMachineStatus(int index) {
+  // Méthode privée pour (re)charger les données
+  void _loadData() {
     setState(() {
-      machines[index].toggleStatus();
+      _machinesFuture = _machineService.getMachinesByDept(widget.deptName);
     });
+  }
 
-    // 1. Supprime immédiatement toute SnackBar existante pour éviter l'accumulation
-    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+  // --- LOGIQUE MÉTIER (Business Logic) ---
+  
+  Future<void> _handleMachineToggle(Machine machine) async {
+    // 1. Demander confirmation via notre Helper (Clean Code)
+    bool confirmed = await DialogHelper.showConfirmation(
+      context: context, 
+      machine: machine
+    );
 
-    // 2. Affiche la nouvelle notification avec une durée de 2 secondes
+    if (!confirmed) return; // Si annulé, on arrête tout
+
+    // 2. Feedback visuel immédiat
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(
-              machines[index].isOpen ? Icons.check_circle : Icons.power_settings_new,
-              color: Colors.white,
-            ),
-            const SizedBox(width: 10),
-            Text("${machines[index].name} est ${machines[index].statusText}"),
-          ],
-        ),
-        backgroundColor: machines[index].isOpen ? Colors.green : Colors.red,
-        duration: const Duration(seconds: 2), // Disparaît après 2 secondes
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
+      const SnackBar(content: Text("Traitement en cours..."), duration: Duration(milliseconds: 500)),
+    );
+
+    // 3. Appel API
+    int newState = machine.etat == 1 ? 0 : 1;
+    bool success = await _machineService.toggleMachine(machine.id, newState);
+
+    if (!mounted) return;
+
+    // 4. Gestion du résultat
+    if (success) {
+      _loadData(); // Rafraîchir la liste
+      _showSnackBar("Succès : État mis à jour", Colors.green);
+    } else {
+      _showSnackBar("Erreur : Connexion échouée", Colors.red);
+    }
+  }
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: color),
     );
   }
+
+  // --- CONSTRUCTION DE L'UI (View) ---
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Département ${widget.deptName}"),
-        backgroundColor: Colors.blueGrey,
-        foregroundColor: Colors.white,
+        title: Text("Zone ${widget.deptName}"),
+        actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadData),
+        ],
       ),
-      body: machines.isEmpty
-          ? const Center(
-              child: Text("Aucune machine répertoriée dans ce département."),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: machines.length,
-              itemBuilder: (context, index) {
-                // Utilisation du Widget réutilisable (Composition)
-                return MachineCard(
-                  machine: machines[index],
-                  onToggle: () => _toggleMachineStatus(index),
-                );
-              },
-            ),
+      body: FutureBuilder<List<Machine>>(
+        future: _machinesFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return _buildLoading();
+          }
+          if (snapshot.hasError) {
+            return _buildError(snapshot.error.toString());
+          }
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return _buildEmpty();
+          }
+
+          // Si tout est OK, on affiche la liste
+          return _buildList(snapshot.data!);
+        },
+      ),
+    );
+  }
+
+  // --- WIDGETS PRIVÉS (Décomposition UI) ---
+
+  Widget _buildLoading() {
+    return const Center(child: CircularProgressIndicator());
+  }
+
+  Widget _buildError(String error) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline, size: 60, color: Colors.red),
+          const SizedBox(height: 10),
+          Text("Une erreur est survenue :\n$error", textAlign: TextAlign.center),
+          const SizedBox(height: 20),
+          ElevatedButton(onPressed: _loadData, child: const Text("Réessayer")),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmpty() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inbox, size: 60, color: Colors.grey[400]),
+          const SizedBox(height: 10),
+          Text("Aucune machine dans la zone ${widget.deptName}", style: TextStyle(color: Colors.grey[600])),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildList(List<Machine> machines) {
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: machines.length,
+      itemBuilder: (context, index) {
+        final machine = machines[index];
+        return MachineCard(
+          machine: machine,
+          onToggle: () => _handleMachineToggle(machine),
+        );
+      },
     );
   }
 }

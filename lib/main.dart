@@ -41,9 +41,45 @@ class ElFouladhApp extends StatelessWidget {
           
           // Thème Sombre
           darkTheme: ThemeData(
-            useMaterial3: true,
-            brightness: Brightness.dark,
-            colorSchemeSeed: Colors.blueGrey,
+          useMaterial3: true,
+          brightness: Brightness.dark,
+          colorSchemeSeed: Colors.blueGrey,
+          scaffoldBackgroundColor: const Color(0xFF121212), // Fond sombre de l'écran
+
+            // --- C'EST ICI QUE LA MAGIE OPÈRE ---
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true, // On remplit le fond du champ
+              fillColor: Colors.white.withOpacity(0.9), // Fond BLANC (pour voir le texte noir)
+              
+              // 1. Couleur du LABEL (ex: "Matricule")
+              labelStyle: const TextStyle(
+                color: Colors.black87, 
+                fontWeight: FontWeight.bold
+              ),
+              
+              // 2. Couleur du texte d'aide (Hint)
+              hintStyle: const TextStyle(color: Colors.black54),
+
+              // 3. Bordures
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Colors.grey, width: 1),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Colors.blue, width: 2),
+              ),
+            ),
+
+            // 4. Couleur du TEXTE QUE L'ON ÉCRIT
+            textTheme: const TextTheme(
+              bodyLarge: TextStyle(color: Colors.black), // Le texte tapé sera NOIR
+              bodyMedium: TextStyle(color: Colors.black), 
+            ),
           ),
 
           // --- GESTION DE LA NAVIGATION ---

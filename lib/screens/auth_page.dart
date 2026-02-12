@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
-
+import 'package:flutter/services.dart';
+import '../widgets/custom_text_field.dart'; 
+import '../utils/validators.dart';          
+import '../services/auth_service.dart';     
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
@@ -9,69 +12,179 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> {
-  bool isLogin = true;
+ 
+  // Le service qui parle au serveur (PHP)
+  final AuthService _authService = AuthService(); 
+  
+  // La clé pour valider le formulaire
   final _formKey = GlobalKey<FormState>();
+  
+  // Les contrôleurs pour récupérer le texte
   final TextEditingController _matriculeController = TextEditingController();
   final TextEditingController _passController = TextEditingController();
 
-  void _submit() {
-    if (_formKey.currentState!.validate()) {
-      // Navigation vers l'accueil si validation OK
-      Navigator.pushReplacementNamed(context, '/home');
+  // Les variables d'état (La mémoire de la page)
+  bool _isLoginMode = true; // true = Connexion, false = Inscription
+  bool _isLoading = false;  // true = Affiche le rond qui tourne
+
+  // Basculer entre Connexion et Inscription
+  void _toggleMode() {
+    setState(() {
+      _isLoginMode = !_isLoginMode;
+      _formKey.currentState?.reset(); // Efface les messages d'erreur rouges
+    });
+  }
+
+  // Envoyer le formulaire
+  Future<void> _submitForm() async {
+    // Si le formulaire n'est pas valide (ex: matricule < 5), on arrête tout
+    if (!_formKey.currentState!.validate()) return;
+
+    // On affiche le chargement
+    setState(() => _isLoading = true);
+
+    // On récupère les valeurs
+    final String matricule = _matriculeController.text;
+    final String password = _passController.text;
+    
+    Map<String, dynamic> result;
+
+    // On appelle le Service (Clean Code)
+    try {
+      if (_isLoginMode) {
+        result = await _authService.login(matricule, password);
+      } else {
+        result = await _authService.register(matricule, password);
+      }
+      
+      // On traite la réponse
+      _handleResponse(result);
+
+    } catch (e) {
+      // Erreur grave (ex: crash du code)
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Erreur interne : $e"), backgroundColor: Colors.red),
+      );
+    }
+    
+    // On cache le chargement
+    setState(() => _isLoading = false);
+  }
+
+  // Gérer la réponse du serveur (Succès ou Erreur)
+  void _handleResponse(Map<String, dynamic> response) {
+    if (!mounted) return; // Sécurité Flutter
+
+    if (response['status'] == 'success') {
+      // --- SUCCÈS ---
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isLoginMode ? "Connexion réussie !" : "Compte créé ! Connectez-vous."),
+          backgroundColor: Colors.green,
+        ),
+      );
+
+      if (_isLoginMode) {
+        // Vers l'accueil
+        Navigator.pushReplacementNamed(context, '/home');
+      } else {
+        // Après inscription, on retourne sur le login et on vide le mot de passe
+        _toggleMode(); 
+        _passController.clear();
+      }
+    } else {
+      // --- ERREUR (ex: Mauvais mot de passe) ---
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(response['message'] ?? "Erreur inconnue"),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.grey[100],
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
           child: Card(
             elevation: 8,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             child: Padding(
-              padding: const EdgeInsets.all(25.0),
+              padding: const EdgeInsets.all(30.0),
               child: Form(
                 key: _formKey,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.factory, size: 60, color: Colors.blueGrey),
-                    const SizedBox(height: 10),
+                    // LOGO
+                    Image.asset('assets/images/elfouladh_logo.png', height: 100),
+                    const SizedBox(height: 30),
+
+                    // TITRE
                     Text(
-                      "El Fouladh System",
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                      _isLoginMode ? "Connexion" : "Inscription",
+                      style: const TextStyle(
+                        fontSize: 24, 
+                        fontWeight: FontWeight.bold, 
+                        color: Colors.blueGrey
+                      ),
                     ),
-                    const SizedBox(height: 20),
-                    Text(isLogin ? "Authentification" : "Inscription"),
-                    const SizedBox(height: 20),
-                    TextFormField(
+                    const SizedBox(height: 25),
+
+                    // CHAMP MATRICULE (Utilise notre Widget Custom)
+                    CustomTextField(
                       controller: _matriculeController,
-                      decoration: const InputDecoration(labelText: "Matricule", border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
-                      validator: (value) => value!.isEmpty ? "Champ requis" : null,
+                      label: "Matricule",
+                      icon: Icons.person,
+                      validator: Validators.validateMatricule,
+                      keyboardType: TextInputType.number,
+                      formatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(5),
+                      ],
                     ),
+                    
                     const SizedBox(height: 15),
-                    TextFormField(
+
+                    // CHAMP PASSWORD (Utilise notre Widget Custom)
+                    CustomTextField(
                       controller: _passController,
-                      obscureText: true,
-                      decoration: const InputDecoration(labelText: "Mot de passe", border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock)),
-                      validator: (value) => value!.length < 4 ? "Trop court" : null,
+                      label: "Mot de passe",
+                      icon: Icons.lock,
+                      validator: Validators.validatePassword,
+                      isPassword: true,
                     ),
-                    const SizedBox(height: 20),
+                    
+                    const SizedBox(height: 25),
+
+                    // BOUTON D'ACTION
                     SizedBox(
                       width: double.infinity,
                       height: 50,
-                      child: ElevatedButton(
-                        onPressed: _submit,
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blueGrey),
-                        child: Text(isLogin ? "CONNEXION" : "S'INSCRIRE", style: const TextStyle(color: Colors.white)),
-                      ),
+                      child: _isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : ElevatedButton(
+                              onPressed: _submitForm,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _isLoginMode ? Colors.blueGrey : Colors.green[700],
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: Text(
+                                _isLoginMode ? "SE CONNECTER" : "S'INSCRIRE",
+                                style: const TextStyle(color: Colors.white, fontSize: 16),
+                              ),
+                            ),
                     ),
+
+                    // BOUTON BASCULE
                     TextButton(
-                      onPressed: () => setState(() => isLogin = !isLogin),
-                      child: Text(isLogin ? "Créer un compte" : "J'ai déjà un compte"),
-                    )
+                      onPressed: _toggleMode,
+                      child: Text(_isLoginMode ? "Créer un compte" : "J'ai déjà un compte"),
+                    ),
                   ],
                 ),
               ),
